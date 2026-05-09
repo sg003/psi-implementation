@@ -4,7 +4,7 @@ LIBS     = -lgmpxx -lgmp -lssl -lcrypto
 
 all: server client generate_dataset test_gm test_client
 
-server: server/server.cpp server/protocols.cpp bloom_filter.cpp gm.cpp
+server: server/server.cpp bloom_filter.cpp gm.cpp
 	$(CXX) $(CXXFLAGS) $^ $(LIBS) -o $@
 
 client: client/client.cpp client/protocols.cpp bloom_filter.cpp gm.cpp
