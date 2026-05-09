@@ -13,10 +13,10 @@ make
 
 ```bash
 # Terminal 1
-./server <protocol>
+./psi_server <protocol>
 
 # Terminal 2
-./client <protocol>
+./psi_client <protocol>
 ```
 
 Protocols: `psi_ca` | `psi` | `apsi_ca` | `apsi`

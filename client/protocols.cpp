@@ -19,14 +19,14 @@ std::vector<mpz_class> build_and_encrypt_bf(GM& gm, const GMPublicKey& pk, const
     return encrypted_bf;
 }
 
-void send_encrypted_bf(int fd, const std::vector<mpz_class>& encrypted_bf){
+void send_encrypted_bf(sock_t fd, const std::vector<mpz_class>& encrypted_bf){
     uint32_t size = encrypted_bf.size();
     send_all(fd, &size, sizeof(size));
     for (const auto& b : encrypted_bf)
         send_mpz(fd, b);
 }
 
-std::vector<std::vector<mpz_class>> recv_server_response(int fd, size_t v, size_t k) {
+std::vector<std::vector<mpz_class>> recv_server_response(sock_t fd, size_t v, size_t k) {
     std::vector<std::vector<mpz_class>> response;
     response.reserve(v);
     for (size_t i = 0; i < v; i++) {
@@ -38,7 +38,7 @@ std::vector<std::vector<mpz_class>> recv_server_response(int fd, size_t v, size_
     return response;
 }
 
-int client_psi_ca(int fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {
+int client_psi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {
     size_t m = bf_optimal_size(v, K);
     std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
     send_encrypted_bf(fd, encrypted_bf);
@@ -57,8 +57,8 @@ int client_psi_ca(int fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, 
     return cardinality;
 }
 
-void client_psi(int fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
+void client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
 
-void client_apsi_ca(int fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
+void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
 
-void client_apsi(int fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
+void client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
