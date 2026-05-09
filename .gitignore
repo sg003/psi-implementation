@@ -1,0 +1,11 @@
+.vscode/
+
+cards.txt
+
+# executables
+/server
+/client
+/test_gm
+/test_client
+/generate_dataset
+*.exe
