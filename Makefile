@@ -1,6 +1,9 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -O2
-LIBS     = -lgmpxx -lgmp -lssl -lcrypto -lws2_32
+LIBS     = -lgmpxx -lgmp -lssl -lcrypto
+ifeq ($(OS),Windows_NT)
+	LIBS += -lws2_32
+endif
 
 all: psi_server psi_client generate_dataset test_gm test_client
 
