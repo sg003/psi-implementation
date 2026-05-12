@@ -7,7 +7,7 @@ endif
 
 all: psi_server psi_client generate_dataset test_gm test_client
 
-psi_server: server/server.cpp bloom_filter.cpp gm.cpp
+psi_server: server/server.cpp server/protocols.cpp bloom_filter.cpp gm.cpp
 	$(CXX) $(CXXFLAGS) $^ $(LIBS) -o $@
 
 psi_client: client/client.cpp client/protocols.cpp bloom_filter.cpp gm.cpp

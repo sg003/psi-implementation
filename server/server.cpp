@@ -1,5 +1,6 @@
 #include "../net.hpp"
 #include "../gm.hpp"
+#include "../bloom_filter.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -28,7 +29,19 @@ static std::vector<std::string> load_dataset(const std::string& path, size_t sam
     return universe;
 }
 
+void server_psi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
+void server_psi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
+void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
+void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
+
 int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cerr << "Usage: ./client <protocol>\n";
+        std::cerr << "Protocols: psi_ca | psi | apsi_ca | apsi\n";
+        return 1;
+    }
+    std::string protocol = argv[1];
+
 #ifdef _WIN32
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -59,11 +72,16 @@ int main(int argc, char* argv[]) {
     GMPublicKey pk;
     recv_mpz(conn_fd, pk.n);
     recv_mpz(conn_fd, pk.u);
+    std::cout << "Received n and u from client.\n";
 
     uint32_t v = static_cast<uint32_t>(X.size());
     send_all(conn_fd, &v, sizeof(v));
 
-    // --- server-side PSI-CA logic goes here ---
+    if      (protocol == "psi_ca")  server_psi_ca(conn_fd, X, pk, v);
+    else if (protocol == "psi")     server_psi(conn_fd, X, pk, v);
+    else if (protocol == "apsi_ca") server_apsi_ca(conn_fd, X, pk, v);
+    else if (protocol == "apsi")    server_apsi(conn_fd, X, pk, v);
+    else { std::cerr << "Unknown protocol: " << protocol << "\n"; return 1; }
 
     CLOSE_SOCKET(conn_fd);
     CLOSE_SOCKET(listen_fd);
