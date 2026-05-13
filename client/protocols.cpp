@@ -3,6 +3,7 @@
 #include "../bloom_filter.hpp"
 #include <string>
 #include <vector>
+#include <iostream>
 
 /** 
 * Builds the bf then encrypts it
@@ -59,6 +60,90 @@ int client_psi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& s
 
 void client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
 
-void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
+
+void send_bytes(sock_t fd, const std::vector<unsigned char>& data) {
+    uint32_t size = static_cast<uint32_t>(data.size());
+    send_all(fd, &size, sizeof(size));
+    if (size > 0) send_all(fd, data.data(), size);
+}
+
+void send_string(sock_t fd, const std::string& s) {
+    uint32_t size = static_cast<uint32_t>(s.size());
+    send_all(fd, &size, sizeof(size));
+    if (size > 0) send_all(fd, s.data(), size);
+}
+
+std::string recv_string(sock_t fd) {
+    uint32_t size = 0;
+    recv_all(fd, &size, sizeof(size));
+
+    std::string s(size, '\0');
+    if (size > 0) recv_all(fd, s.data(), size);
+    return s;
+}
+
+
+void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port) {
+    sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (ca_fd < 0) { perror("socket"); exit(1); }
+    sockaddr_in ca_addr{};
+    ca_addr.sin_family = AF_INET;
+    ca_addr.sin_port = htons(ca_port);
+    if (inet_pton(AF_INET, ca_host.c_str(), &ca_addr.sin_addr) <= 0) {
+        std::cerr << "Invalid CA host address\n";
+        exit(1);
+    }
+    if (connect(ca_fd, (sockaddr*)&ca_addr, sizeof(ca_addr)) < 0) { perror("connect to CA"); exit(1); }
+
+    // Send public key and set to CA
+    send_mpz(ca_fd, pk.n);
+    send_mpz(ca_fd, pk.u);
+    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
+    send_all(ca_fd, &m, sizeof(m));
+    uint32_t y_size = Y.size();
+    send_all(ca_fd, &y_size, sizeof(y_size));
+    for (const auto& item : Y) {
+        uint32_t len = item.size();
+        send_all(ca_fd, &len, sizeof(len));
+        send_all(ca_fd, item.data(), len);
+    }
+
+    // Receive signature
+    uint32_t sig_size = 0;
+    recv_all(ca_fd, &sig_size, sizeof(sig_size));
+    std::vector<unsigned char> signature(sig_size);
+    recv_all(ca_fd, signature.data(), sig_size);
+
+    // Receive encrypted BF
+    uint32_t bf_size = 0;
+    recv_all(ca_fd, &bf_size, sizeof(bf_size));
+    std::vector<mpz_class> encrypted_bf(bf_size);
+    for (uint32_t i = 0; i < bf_size; ++i) {
+        recv_mpz(ca_fd, encrypted_bf[i]);
+    }
+
+    std::string ca_public_key_pem = recv_string(ca_fd);
+
+    CLOSE_SOCKET(ca_fd);
+
+    // Send to server
+    send_string(fd, ca_public_key_pem);
+    send_bytes(fd, signature);
+    send_encrypted_bf(fd, encrypted_bf);
+
+    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+    int cardinality = 0;
+    for (const auto& e_si : response) {
+        bool all_zero = true;
+        for (const auto& ciphertext : e_si) {
+            if (gm.decrypt_bit(sk, ciphertext) != 0) {
+                all_zero = false;
+                break;
+            }
+        }
+        if (all_zero) cardinality++;
+    }
+    std::cout << "APSI-CA cardinality: " << cardinality << "\n";
+}
 
 void client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
