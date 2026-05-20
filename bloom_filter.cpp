@@ -42,3 +42,10 @@ bool bf_check(const BloomFilter& bf, const std::string& s) {
     }
     return true;
 }
+
+// j-th bit of SHA-256(s) — used as φ(s) in PSI
+int phi_bit(const std::string& s, size_t j) {
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(s.data()), s.size(), digest);
+    return (digest[j / 8] >> (7 - (j % 8))) & 1;
+}

@@ -3,11 +3,27 @@
 #include "../bloom_filter.hpp"
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <iostream>
 
-/** 
-* Builds the bf then encrypts it
-*/
+static std::unordered_map<std::string, std::string> build_phi_map(const std::vector<std::string>& Y) {
+    std::unordered_map<std::string, std::string> phi_map;
+    for (const auto& ci : Y) {
+        std::string phi_ci(K, '0');
+        for (size_t j = 0; j < K; j++)
+            phi_ci[j] = '0' + phi_bit(ci, j);
+        phi_map[phi_ci] = ci;
+    }
+    return phi_map;
+}
+
+static std::string decrypt_group(GM& gm, const GMSecretKey& sk, const std::vector<mpz_class>& group) {
+    std::string bits(K, '0');
+    for (size_t j = 0; j < K; j++)
+        bits[j] = '0' + gm.decrypt_bit(sk, group[j]);
+    return bits;
+}
+
 std::vector<mpz_class> build_and_encrypt_bf(GM& gm, const GMPublicKey& pk, const std::vector<std::string>& Y, size_t m, size_t k){
     BloomFilter bf = bf_init(m, k);
     for (const auto& item : Y){
@@ -58,7 +74,25 @@ int client_psi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& s
     return cardinality;
 }
 
-void client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
+void client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {
+    size_t m = bf_optimal_size(v, K);
+    std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
+    send_encrypted_bf(fd, encrypted_bf);
+    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+
+    auto phi_map = build_phi_map(Y);
+
+    std::vector<std::string> intersection;
+    for (const auto& e_si : response) {
+        auto it = phi_map.find(decrypt_group(gm, sk, e_si));
+        if (it != phi_map.end())
+            intersection.push_back(it->second);
+    }
+
+    std::cout << "Intersection size: " << intersection.size() << "\n";
+    for (const auto& elem : intersection)
+        std::cout << "  " << elem << "\n";
+}
 
 
 void send_bytes(sock_t fd, const std::vector<unsigned char>& data) {

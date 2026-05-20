@@ -21,7 +21,7 @@
 #endif
 
 #define PSI_PORT 9999
-static const size_t K = 10;
+static const size_t K = 30; // BF hash functions and φ output length; 1/2^K false positive rate
 
 static void send_all(sock_t fd, const void* buf, size_t n) {
     const char* p = static_cast<const char*>(buf);
