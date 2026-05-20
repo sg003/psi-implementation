@@ -9,3 +9,5 @@ cards.txt
 /test_client
 /generate_dataset
 *.exe
+ca_public.pem
+psi_ca_authority

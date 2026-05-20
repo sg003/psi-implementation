@@ -11,12 +11,30 @@ make
 
 ## Run
 
+
+### Running Protocols
+
+#### For `psi_ca`, `psi`, and `apsi`:
 ```bash
 # Terminal 1
 ./psi_server <protocol>
 
 # Terminal 2
 ./psi_client <protocol>
+```
+
+#### For `apsi_ca`:
+```bash
+# Terminal 1: Start the CA authority
+./psi_ca_authority apsi_ca
+
+# Terminal 2: Start the server
+./psi_server apsi_ca
+
+# Terminal 3: Start the client (provide CA host and port)
+./psi_client apsi_ca <CA_HOST> <CA_PORT>
+# Example:
+# ./psi_client apsi_ca 127.0.0.1 9001
 ```
 
 Protocols: `psi_ca` | `psi` | `apsi_ca` | `apsi`
