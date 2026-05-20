@@ -30,7 +30,7 @@ static std::vector<std::string> load_dataset(const std::string& path, size_t sam
 
 int  client_psi_ca (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v);
 void client_psi    (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v);
-void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v);
+void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port);
 void client_apsi   (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v);
 
 GM gm;
@@ -38,9 +38,10 @@ GMPublicKey pk;
 GMSecretKey sk;
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cerr << "Usage: ./client <protocol>\n";
+    if (argc < 2) {
+        std::cerr << "Usage: ./client <protocol> [ca_host ca_port]\n";
         std::cerr << "Protocols: psi_ca | psi | apsi_ca | apsi\n";
+        std::cerr << "For apsi_ca, provide CA host and port as extra arguments.\n";
         return 1;
     }
     std::string protocol = argv[1];
@@ -50,37 +51,63 @@ int main(int argc, char* argv[]) {
     WSAStartup(MAKEWORD(2, 2), &wsa);
 #endif
 
-    sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { perror("socket"); return 1; }
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(PSI_PORT);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-    if (connect(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("connect"); return 1; }
-    std::cout << "Connected to server.\n";
-
     std::vector<std::string> Y = load_dataset("cards.txt", 50, SEED);
 
     gm.keygen(2048, pk, sk);
-    send_mpz(fd, pk.n);
-    send_mpz(fd, pk.u);
-    uint32_t v;
-    recv_all(fd, &v, sizeof(v));
-    std::cout << "Received v from server.\n";
-    if      (protocol == "psi_ca") {
-        int cardinality = client_psi_ca(fd, gm, pk, sk, Y, v);
-        std::cout << "Cardinality: " << cardinality << "\n";
-    }
-    else if (protocol == "psi")     client_psi(fd, gm, pk, sk, Y, v);
-    else if (protocol == "apsi_ca") client_apsi_ca(fd, gm, pk, sk, Y, v);
-    else if (protocol == "apsi")    client_apsi(fd, gm, pk, sk, Y, v);
-    else { std::cerr << "Unknown protocol: " << protocol << "\n"; return 1; }
 
-    CLOSE_SOCKET(fd);
-#ifdef _WIN32
+    if (protocol == "apsi_ca") {
+        if (argc < 4) {
+            std::cerr << "For apsi_ca, provide CA host and port as arguments.\n";
+            return 1;
+        }
+        std::string ca_host = argv[2];
+        int ca_port = std::stoi(argv[3]);
+        // Connect to server as usual
+        sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) { perror("socket"); return 1; }
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port   = htons(PSI_PORT);
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        if (connect(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("connect"); return 1; }
+        std::cout << "Connected to server.\n";
+        send_mpz(fd, pk.n);
+        send_mpz(fd, pk.u);
+        uint32_t v;
+        recv_all(fd, &v, sizeof(v));
+        std::cout << "Received v from server.\n";
+        client_apsi_ca(fd, gm, pk, sk, Y, v, ca_host, ca_port);
+        CLOSE_SOCKET(fd);
+    } else {
+        sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) { perror("socket"); return 1; }
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port   = htons(PSI_PORT);
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        if (connect(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("connect"); return 1; }
+        std::cout << "Connected to server.\n";
+
+        std::vector<std::string> Y = load_dataset("cards.txt", 50, SEED);
+
+        gm.keygen(2048, pk, sk);
+        send_mpz(fd, pk.n);
+        send_mpz(fd, pk.u);
+        uint32_t v;
+        recv_all(fd, &v, sizeof(v));
+        std::cout << "Received v from server.\n";
+        if      (protocol == "psi_ca") {
+            int cardinality = client_psi_ca(fd, gm, pk, sk, Y, v);
+            std::cout << "Cardinality: " << cardinality << "\n";
+        }
+        else if (protocol == "psi")     client_psi(fd, gm, pk, sk, Y, v);
+        else if (protocol == "apsi")    client_apsi(fd, gm, pk, sk, Y, v);
+        else { std::cerr << "Unknown protocol: " << protocol << "\n"; return 1; }
+        CLOSE_SOCKET(fd);
+    }
+
+    #ifdef _WIN32
     WSACleanup();
-#endif
+    #endif
     return 0;
 }
