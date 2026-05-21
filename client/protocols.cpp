@@ -24,6 +24,68 @@ static std::string decrypt_group(GM& gm, const GMSecretKey& sk, const std::vecto
     return bits;
 }
 
+std::string recv_string(sock_t fd);
+
+struct CACertificate {
+    std::string public_key_pem;
+    std::vector<unsigned char> signature;
+    std::vector<mpz_class> encrypted_bf;
+};
+
+static sock_t connect_to_ca(const std::string& ca_host, int ca_port) {
+    sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (ca_fd < 0) { perror("socket"); exit(1); }
+
+    sockaddr_in ca_addr{};
+    ca_addr.sin_family = AF_INET;
+    ca_addr.sin_port = htons(ca_port);
+    if (inet_pton(AF_INET, ca_host.c_str(), &ca_addr.sin_addr) <= 0) {
+        std::cerr << "Invalid CA host address\n";
+        exit(1);
+    }
+    if (connect(ca_fd, (sockaddr*)&ca_addr, sizeof(ca_addr)) < 0) { perror("connect to CA"); exit(1); }
+
+    return ca_fd;
+}
+
+static CACertificate fetch_ca_certificate(
+    sock_t ca_fd,
+    const GMPublicKey& pk,
+    const std::vector<std::string>& client_set,
+    uint32_t v
+) {
+    CACertificate cert;
+
+    send_mpz(ca_fd, pk.n);
+    send_mpz(ca_fd, pk.u);
+
+    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
+    send_all(ca_fd, &m, sizeof(m));
+
+    uint32_t set_size = static_cast<uint32_t>(client_set.size());
+    send_all(ca_fd, &set_size, sizeof(set_size));
+    for (const auto& item : client_set) {
+        uint32_t len = static_cast<uint32_t>(item.size());
+        send_all(ca_fd, &len, sizeof(len));
+        send_all(ca_fd, item.data(), len);
+    }
+
+    uint32_t sig_size = 0;
+    recv_all(ca_fd, &sig_size, sizeof(sig_size));
+    cert.signature.resize(sig_size);
+    recv_all(ca_fd, cert.signature.data(), sig_size);
+
+    uint32_t bf_size = 0;
+    recv_all(ca_fd, &bf_size, sizeof(bf_size));
+    cert.encrypted_bf.resize(bf_size);
+    for (uint32_t i = 0; i < bf_size; ++i) {
+        recv_mpz(ca_fd, cert.encrypted_bf[i]);
+    }
+
+    cert.public_key_pem = recv_string(ca_fd);
+    return cert;
+}
+
 std::vector<mpz_class> build_and_encrypt_bf(GM& gm, const GMPublicKey& pk, const std::vector<std::string>& Y, size_t m, size_t k){
     BloomFilter bf = bf_init(m, k);
     for (const auto& item : Y){
@@ -118,52 +180,14 @@ std::string recv_string(sock_t fd) {
 
 
 void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port) {
-    sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (ca_fd < 0) { perror("socket"); exit(1); }
-    sockaddr_in ca_addr{};
-    ca_addr.sin_family = AF_INET;
-    ca_addr.sin_port = htons(ca_port);
-    if (inet_pton(AF_INET, ca_host.c_str(), &ca_addr.sin_addr) <= 0) {
-        std::cerr << "Invalid CA host address\n";
-        exit(1);
-    }
-    if (connect(ca_fd, (sockaddr*)&ca_addr, sizeof(ca_addr)) < 0) { perror("connect to CA"); exit(1); }
-
-    // Send public key and set to CA
-    send_mpz(ca_fd, pk.n);
-    send_mpz(ca_fd, pk.u);
-    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
-    send_all(ca_fd, &m, sizeof(m));
-    uint32_t y_size = Y.size();
-    send_all(ca_fd, &y_size, sizeof(y_size));
-    for (const auto& item : Y) {
-        uint32_t len = item.size();
-        send_all(ca_fd, &len, sizeof(len));
-        send_all(ca_fd, item.data(), len);
-    }
-
-    // Receive signature
-    uint32_t sig_size = 0;
-    recv_all(ca_fd, &sig_size, sizeof(sig_size));
-    std::vector<unsigned char> signature(sig_size);
-    recv_all(ca_fd, signature.data(), sig_size);
-
-    // Receive encrypted BF
-    uint32_t bf_size = 0;
-    recv_all(ca_fd, &bf_size, sizeof(bf_size));
-    std::vector<mpz_class> encrypted_bf(bf_size);
-    for (uint32_t i = 0; i < bf_size; ++i) {
-        recv_mpz(ca_fd, encrypted_bf[i]);
-    }
-
-    std::string ca_public_key_pem = recv_string(ca_fd);
-
+    sock_t ca_fd = connect_to_ca(ca_host, ca_port);
+    CACertificate cert = fetch_ca_certificate(ca_fd, pk, Y, v);
     CLOSE_SOCKET(ca_fd);
 
     // Send to server
-    send_string(fd, ca_public_key_pem);
-    send_bytes(fd, signature);
-    send_encrypted_bf(fd, encrypted_bf);
+    send_string(fd, cert.public_key_pem);
+    send_bytes(fd, cert.signature);
+    send_encrypted_bf(fd, cert.encrypted_bf);
 
     std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
     int cardinality = 0;
@@ -180,4 +204,45 @@ void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey&
     std::cout << "APSI-CA cardinality: " << cardinality << "\n";
 }
 
-void client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {}
+void client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port) {
+    sock_t ca_fd = connect_to_ca(ca_host, ca_port);
+
+    // 1. Build the mapping: K-bit string -> Raw string
+    auto phi_map = build_phi_map(Y);
+    
+    // 2. Extract strictly the K-bit strings to send to the CA
+    std::vector<std::string> Y_hashed;
+    Y_hashed.reserve(phi_map.size());
+    for (const auto& pair : phi_map) {
+        Y_hashed.push_back(pair.first); // pair.first is the K-bit string
+    }
+
+    CACertificate cert = fetch_ca_certificate(ca_fd, pk, Y_hashed, v);
+
+    CLOSE_SOCKET(ca_fd);
+
+    // Send to server
+    send_string(fd, cert.public_key_pem);
+    send_bytes(fd, cert.signature);
+    send_encrypted_bf(fd, cert.encrypted_bf);
+
+    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+    
+    std::vector<std::string> intersection;
+
+    for (const auto& e_si : response) {
+        // d is the decrypted K-bit string
+        std::string d = decrypt_group(gm, sk, e_si);
+
+        // Look up the K-bit string in our map
+        auto it = phi_map.find(d);
+        if (it != phi_map.end()) {
+            // If found, push the original credit card string into the intersection
+            intersection.push_back(it->second);
+        }
+    }
+
+    std::cout << "Intersection size: " << intersection.size() << "\n";
+    for (const auto& elem : intersection)
+        std::cout << "  " << elem << "\n";
+}

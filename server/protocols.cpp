@@ -19,6 +19,7 @@ static std::vector<mpz_class> xor_bf_with_phi(GM& gm, const GMPublicKey& pk,
             : gm.rerandomize(pk, encrypted_bf[index]);
     }
     return result;
+}
 
 std::vector<unsigned char> recv_bytes(sock_t fd) {
     uint32_t size = 0;
@@ -57,6 +58,15 @@ std::vector<mpz_class> recv_encrypted_bf(sock_t fd) {
     }
 
     return encrypted_bf;
+}
+
+static bool verify_ca_certificate(
+    const std::string& ca_public_key_pem,
+    const std::vector<unsigned char>& signature,
+    const std::vector<mpz_class>& encrypted_bf
+) {
+    std::vector<unsigned char> message = serialize_encrypted_bf(encrypted_bf);
+    return verify_signature(ca_public_key_pem, message, signature);
 }
 
 void process_encrypted_bf_for_cardinality(
@@ -123,15 +133,7 @@ void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublic
 
     std::vector<mpz_class> encrypted_bf = recv_encrypted_bf(fd);
 
-    std::vector<unsigned char> message = serialize_encrypted_bf(encrypted_bf);
-
-    bool valid = verify_signature(
-        ca_public_key_pem,
-        message,
-        signature
-    );
-
-    if (!valid) {
+    if (!verify_ca_certificate(ca_public_key_pem, signature, encrypted_bf)) {
         std::cerr << "APSI-CA signature verification failed. Aborting.\n";
         return;
     }
@@ -146,4 +148,46 @@ void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublic
     );
 }
 
-void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v) {}
+void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v) {
+    std::string ca_public_key_pem = recv_string(fd);
+
+    std::vector<unsigned char> signature = recv_bytes(fd);
+
+    uint32_t m32 = 0;
+    recv_all(fd, &m32, sizeof(m32));
+    size_t m = static_cast<size_t>(m32);
+
+    std::vector<mpz_class> encrypted_bf(m);
+    for (size_t i = 0; i < m; i++)
+        recv_mpz(fd, encrypted_bf[i]);
+
+    if (!verify_ca_certificate(ca_public_key_pem, signature, encrypted_bf)) {
+        std::cerr << "APSI-CA signature verification failed. Aborting.\n";
+        return;
+    }
+
+    std::cout << "APSI-CA signature verified." << std::endl;
+
+    GM gm;
+    for (const auto& raw_si : X) {
+        // 1. Map the server's raw string into the exact same K-bit format as the client
+        std::string s_kbit(K, '0');
+        for (size_t j = 0; j < K; j++) {
+            s_kbit[j] = '0' + phi_bit(raw_si, j);
+        }
+
+        std::vector<mpz_class> result(K);
+        for (size_t j = 0; j < K; j++) {
+            // 2. IMPORTANT: Use the K-bit string to find the Bloom Filter index!
+            size_t index = bf_hash(s_kbit, j, m);
+            
+            // 3. The payload bit is simply the j-th character of our K-bit string
+            int bit = s_kbit[j] - '0';
+            
+            // 4. Homomorphically multiply (XOR) the ciphertexts
+            result[j] = gm.homomorphic_xor(pk, encrypted_bf[index], gm.encrypt_bit(pk, bit));
+        }
+        for (const auto& c : result)
+            send_mpz(fd, c);
+    }
+}
