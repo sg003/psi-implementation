@@ -8,7 +8,9 @@ PSI-CA, PSI, APSI-CA, APSI from Debnath & Dutta (ISC 2015).
 make
 ./generate_dataset 1000 cards.txt  # count must exceed your largest --client or --server size
 ```
-
+```bash
+make all
+```
 ## Configuration
 
 Key parameters in `config.hpp`:
