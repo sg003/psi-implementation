@@ -1,6 +1,9 @@
 .vscode/
 
 cards.txt
+client_set.txt
+server_set.txt
+*.txt
 
 # executables
 /psi_server
