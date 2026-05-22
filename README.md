@@ -46,10 +46,19 @@ make test_gm
 ./test_gm
 ```
 
-## Server TODO
+# Build and run:
 
-- Receive GM public key: `recv_mpz(fd, pk.n)` then `recv_mpz(fd, pk.u)`
-- Send server set size `v` as `uint32_t` via `send_all`
-- Receive encrypted BF: `uint32_t` size prefix, then `m` ciphertexts via `recv_mpz`
-- For each `si` in `X`: compute `k` hash indices, rerandomize those ciphertexts with `gm.rerandomize`
-- Send back `v` groups of `k` ciphertexts via `send_mpz` — no size prefix, in order
+
+make experiment
+./experiment --protocol psi --client 50 --server 100
+Override any setting via CLI — defaults come from config.hpp:
+
+
+# PSI-CA, different sizes
+./experiment --protocol psi_ca --client 200 --server 500
+
+# Multiple runs, custom output file
+./experiment --protocol psi --runs 5 --output bench.csv
+
+# All defaults from config.hpp (no args needed)
+./experiment
