@@ -173,9 +173,16 @@ std::vector<std::string> client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, co
     return intersection;
 }
 
-void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk,
-                    const std::vector<std::string>& Y, uint32_t v,
-                    const std::string& ca_host, int ca_port) {
+int client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk,
+                   const std::vector<std::string>& Y, uint32_t v,
+                   const std::string& ca_host, int ca_port, ClientTiming* timing) {
+    ClientTiming _t;
+    if (!timing) timing = &_t;
+
+    auto t_total = Clock::now();
+
+    // ── CA round-trip (connect, send set, receive certified BF) ──────────────
+    auto t0 = Clock::now();
     sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (ca_fd < 0) { perror("socket"); exit(1); }
     sockaddr_in ca_addr{};
@@ -213,12 +220,30 @@ void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey&
 
     std::string ca_public_key_pem = recv_string(ca_fd);
     CLOSE_SOCKET(ca_fd);
+    auto t1 = Clock::now();
+    timing->bf_build_ms = elapsed_ms(t0, t1);
 
+    // ── Send certified BF to PSI server ──────────────────────────────────────
+    auto t2 = Clock::now();
     send_string(fd, ca_public_key_pem);
     send_bytes(fd, signature);
     send_encrypted_bf(fd, encrypted_bf);
+    auto t3 = Clock::now();
+    timing->send_ms = elapsed_ms(t2, t3);
+    timing->bytes_sent = sizeof(uint32_t) + ca_public_key_pem.size()
+                       + sizeof(uint32_t) + signature.size()
+                       + sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_sent += mpz_wire_bytes(c);
 
+    // ── Receive PSI server response ───────────────────────────────────────────
+    auto t4 = Clock::now();
     std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+    auto t5 = Clock::now();
+    timing->recv_ms = elapsed_ms(t4, t5);
+    for (const auto& g : response) for (const auto& c : g) timing->bytes_recv += mpz_wire_bytes(c);
+
+    // ── Decrypt ───────────────────────────────────────────────────────────────
+    auto t6 = Clock::now();
     int cardinality = 0;
     for (const auto& e_si : response) {
         bool all_zero = true;
@@ -227,7 +252,12 @@ void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey&
         }
         if (all_zero) cardinality++;
     }
+    auto t7 = Clock::now();
+    timing->decrypt_ms = elapsed_ms(t6, t7);
+    timing->total_ms   = elapsed_ms(t_total, t7);
+
     std::cout << "APSI-CA cardinality: " << cardinality << "\n";
+    return cardinality;
 }
 
 void client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk,

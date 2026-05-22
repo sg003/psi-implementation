@@ -6,6 +6,7 @@
 
 // ── Network ───────────────────────────────────────────────────────────────────
 constexpr int      PSI_PORT      = 9999;
+constexpr int      CA_PORT       = 9001;
 
 // ── Bloom filter / protocol ───────────────────────────────────────────────────
 // K doubles as the number of BF hash functions and the φ output length.

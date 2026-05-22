@@ -32,7 +32,7 @@ static std::vector<std::string> load_dataset(const std::string& path, size_t sam
 
 void server_psi_ca (sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* timing = nullptr);
 void server_psi    (sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* timing = nullptr);
-void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
+void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* timing = nullptr);
 void server_apsi   (sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
 
 int main(int argc, char* argv[]) {

@@ -149,10 +149,23 @@ void server_psi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey&
     for (const auto& resp : all_responses) for (const auto& c : resp) timing->bytes_sent += mpz_wire_bytes(c);
 }
 
-void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v) {
+void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk,
+                    uint32_t v, ServerTiming* timing) {
+    ServerTiming _t;
+    if (!timing) timing = &_t;
+
+    auto t_total = Clock::now();
+
+    auto t0 = Clock::now();
     std::string ca_public_key_pem = recv_string(fd);
     std::vector<unsigned char> signature = recv_bytes(fd);
     std::vector<mpz_class> encrypted_bf = recv_encrypted_bf(fd);
+    auto t1 = Clock::now();
+    timing->recv_bf_ms = elapsed_ms(t0, t1);
+    timing->bytes_recv = sizeof(uint32_t) + ca_public_key_pem.size()
+                       + sizeof(uint32_t) + signature.size()
+                       + sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_recv += mpz_wire_bytes(c);
 
     std::vector<unsigned char> message = serialize_encrypted_bf(encrypted_bf);
     if (!verify_signature(ca_public_key_pem, message, signature)) {
@@ -160,7 +173,32 @@ void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublic
         return;
     }
     std::cout << "APSI-CA signature verified.\n";
-    process_encrypted_bf_for_cardinality(fd, X, pk, encrypted_bf);
+
+    size_t m = encrypted_bf.size();
+    GM gm;
+
+    auto t2 = Clock::now();
+    std::vector<std::vector<mpz_class>> all_responses;
+    all_responses.reserve(X.size());
+    for (const auto& item : X) {
+        std::vector<mpz_class> resp(K);
+        for (size_t j = 0; j < K; j++)
+            resp[j] = gm.rerandomize(pk, encrypted_bf[bf_hash(item, j, m)]);
+        all_responses.push_back(std::move(resp));
+    }
+    auto t3 = Clock::now();
+    timing->compute_ms = elapsed_ms(t2, t3);
+
+    auto t4 = Clock::now();
+    for (const auto& resp : all_responses)
+        for (const auto& c : resp)
+            send_mpz(fd, c);
+    auto t5 = Clock::now();
+    timing->send_ms  = elapsed_ms(t4, t5);
+    timing->total_ms = elapsed_ms(t_total, t5);
+    for (const auto& resp : all_responses)
+        for (const auto& c : resp)
+            timing->bytes_sent += mpz_wire_bytes(c);
 }
 
 void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v) {}

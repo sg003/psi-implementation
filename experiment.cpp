@@ -20,6 +20,8 @@
 #include "gm.hpp"
 #include "bloom_filter.hpp"
 #include "timing.hpp"
+#include "ca/ca.hpp"
+#include "crypto/signature.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -47,12 +49,12 @@ static double elapsed_ms(Clock::time_point a, Clock::time_point b) {
 
 int                      client_psi_ca (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, ClientTiming* = nullptr);
 std::vector<std::string> client_psi    (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, ClientTiming* = nullptr);
-void                     client_apsi_ca(sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, const std::string&, int);
+int                      client_apsi_ca(sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, const std::string&, int, ClientTiming* = nullptr);
 void                     client_apsi   (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t);
 
 void server_psi_ca (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
 void server_psi    (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
-void server_apsi_ca(sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t);
+void server_apsi_ca(sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
 void server_apsi   (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t);
 
 // ── Config & result structs ───────────────────────────────────────────────────
@@ -146,6 +148,23 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
     if (listen(listen_fd, 1) < 0)
         throw std::runtime_error("listen() failed");
 
+    // ── CA socket (apsi_ca only) ──────────────────────────────────────────────
+    sock_t ca_listen_fd = (sock_t)-1;
+    if (cfg.protocol == "apsi_ca") {
+        ca_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (ca_listen_fd < 0) throw std::runtime_error("CA socket() failed");
+        int ca_opt = 1;
+        setsockopt(ca_listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&ca_opt, sizeof(ca_opt));
+        sockaddr_in ca_saddr{};
+        ca_saddr.sin_family      = AF_INET;
+        ca_saddr.sin_addr.s_addr = INADDR_ANY;
+        ca_saddr.sin_port        = htons(CA_PORT);
+        if (bind(ca_listen_fd, (sockaddr*)&ca_saddr, sizeof(ca_saddr)) < 0)
+            throw std::runtime_error("CA bind() failed");
+        if (listen(ca_listen_fd, 1) < 0)
+            throw std::runtime_error("CA listen() failed");
+    }
+
     // ── Server thread ─────────────────────────────────────────────────────────
     std::promise<ServerTiming> srv_promise;
     auto srv_future = srv_promise.get_future();
@@ -165,7 +184,7 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
             ServerTiming st;
             if      (cfg.protocol == "psi_ca")  server_psi_ca (conn_fd, X, srv_pk, v, &st);
             else if (cfg.protocol == "psi")      server_psi    (conn_fd, X, srv_pk, v, &st);
-            else if (cfg.protocol == "apsi_ca")  server_apsi_ca(conn_fd, X, srv_pk, v);
+            else if (cfg.protocol == "apsi_ca")  server_apsi_ca(conn_fd, X, srv_pk, v, &st);
             else if (cfg.protocol == "apsi")     server_apsi   (conn_fd, X, srv_pk, v);
 
             CLOSE_SOCKET(conn_fd);
@@ -174,6 +193,60 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
             srv_promise.set_exception(std::current_exception());
         }
     });
+
+    // ── CA thread (apsi_ca only) ──────────────────────────────────────────────
+    std::thread ca_thread;
+    std::exception_ptr ca_exception;
+    if (cfg.protocol == "apsi_ca") {
+        ca_thread = std::thread([ca_listen_fd, &ca_exception]() {
+            try {
+                sock_t ca_client_fd = accept(ca_listen_fd, nullptr, nullptr);
+                if (ca_client_fd < 0) throw std::runtime_error("CA accept() failed");
+
+                GM ca_gm;
+                SignatureKeyPair ca_keys = generate_signature_keypair();
+
+                GMPublicKey ca_pk;
+                recv_mpz(ca_client_fd, ca_pk.n);
+                recv_mpz(ca_client_fd, ca_pk.u);
+
+                uint32_t m_ca = 0;
+                recv_all(ca_client_fd, &m_ca, sizeof(m_ca));
+
+                uint32_t y_size = 0;
+                recv_all(ca_client_fd, &y_size, sizeof(y_size));
+
+                std::vector<std::string> Y_ca;
+                for (uint32_t i = 0; i < y_size; i++) {
+                    uint32_t len = 0;
+                    recv_all(ca_client_fd, &len, sizeof(len));
+                    std::string item(len, '\0');
+                    recv_all(ca_client_fd, item.data(), len);
+                    Y_ca.push_back(item);
+                }
+
+                CertifiedEncryptedBF cert = ca_certify_client_set_with_keys(
+                    ca_gm, ca_pk, Y_ca, m_ca, K, ca_keys);
+
+                uint32_t sig_size = static_cast<uint32_t>(cert.signature.size());
+                send_all(ca_client_fd, &sig_size, sizeof(sig_size));
+                send_all(ca_client_fd, cert.signature.data(), sig_size);
+
+                uint32_t bf_size = static_cast<uint32_t>(cert.encrypted_bf.size());
+                send_all(ca_client_fd, &bf_size, sizeof(bf_size));
+                for (const auto& c : cert.encrypted_bf)
+                    send_mpz(ca_client_fd, c);
+
+                uint32_t pem_size = static_cast<uint32_t>(cert.ca_public_key_pem.size());
+                send_all(ca_client_fd, &pem_size, sizeof(pem_size));
+                send_all(ca_client_fd, cert.ca_public_key_pem.data(), pem_size);
+
+                CLOSE_SOCKET(ca_client_fd);
+            } catch (...) {
+                ca_exception = std::current_exception();
+            }
+        });
+    }
 
     // ── Client side (main thread) ─────────────────────────────────────────────
     sock_t client_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -214,8 +287,15 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
         res.fp_rate = res.result_size > 0
             ? static_cast<double>(res.false_positives) / res.result_size : 0.0;
     }
-    else if (cfg.protocol == "apsi_ca" || cfg.protocol == "apsi") {
-        std::cerr << "[WARN] " << cfg.protocol << " is not implemented; skipping.\n";
+    else if (cfg.protocol == "apsi_ca") {
+        res.result_size = client_apsi_ca(client_fd, gm, pk, sk, Y, v, "127.0.0.1", CA_PORT, &ct);
+        res.false_positives = std::max(0, res.result_size - res.true_intersection);
+        res.false_negatives = std::max(0, res.true_intersection - res.result_size);
+        res.fp_rate = res.result_size > 0
+            ? static_cast<double>(res.false_positives) / res.result_size : 0.0;
+    }
+    else if (cfg.protocol == "apsi") {
+        std::cerr << "[WARN] apsi is not implemented; skipping.\n";
         res.result_size    = -1;
         res.false_positives = -1;
         res.false_negatives = -1;
@@ -227,7 +307,12 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
     CLOSE_SOCKET(client_fd);
 
     server_thread.join();
+    if (ca_thread.joinable()) {
+        ca_thread.join();
+        if (ca_exception) std::rethrow_exception(ca_exception);
+    }
     CLOSE_SOCKET(listen_fd);
+    if (ca_listen_fd != (sock_t)-1) CLOSE_SOCKET(ca_listen_fd);
 
     res.server = srv_future.get();   // rethrows if server thread threw
     return res;
