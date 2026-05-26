@@ -1,6 +1,9 @@
 .vscode/
 
 cards.txt
+client_set.txt
+server_set.txt
+*.txt
 
 # executables
 /psi_server
@@ -8,6 +11,8 @@ cards.txt
 /test_gm
 /test_client
 /generate_dataset
+/experiment
 *.exe
 ca_public.pem
+results.csv
 psi_ca_authority

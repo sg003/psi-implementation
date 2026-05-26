@@ -1,6 +1,7 @@
 #ifndef NET_HPP
 #define NET_HPP
 
+#include "config.hpp"
 #include <gmpxx.h>
 #include <cstdint>
 #include <stdexcept>
@@ -20,8 +21,6 @@
   #define CLOSE_SOCKET close
 #endif
 
-#define PSI_PORT 9999
-static const size_t K = 30; // BF hash functions and φ output length; 1/2^K false positive rate
 
 static void send_all(sock_t fd, const void* buf, size_t n) {
     const char* p = static_cast<const char*>(buf);
@@ -56,6 +55,11 @@ static void recv_mpz(sock_t fd, mpz_class& val) {
     std::string s(len, '\0');
     recv_all(fd, s.data(), len);
     val.set_str(s, 16);
+}
+
+// Bytes consumed on the wire by send_mpz/recv_mpz for a given value.
+static size_t mpz_wire_bytes(const mpz_class& val) {
+    return sizeof(uint32_t) + val.get_str(16).size();
 }
 
 #endif
