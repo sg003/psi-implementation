@@ -11,6 +11,7 @@ server_set.txt
 /test_gm
 /test_client
 /generate_dataset
+/experiment
 *.exe
 ca_public.pem
 psi_ca_authority
