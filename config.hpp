@@ -15,8 +15,9 @@ constexpr int      CA_PORT       = 9001;
 inline size_t      K             = 30;
 
 // ── Set sizes ─────────────────────────────────────────────────────────────────
-constexpr size_t   SERVER_SET_SIZE = 100;   // v  (server's sample from the universe)
-constexpr size_t   CLIENT_SET_SIZE = 50;    // w  (client's sample from the universe)
+constexpr size_t   SERVER_SET_SIZE = 300;   // v  (server's sample from the universe)
+constexpr size_t   CLIENT_SET_SIZE = 300;    // w  (client's sample from the universe)
+constexpr size_t   UNIVERSE_SIZE   = 1000;   // cap dataset before sampling (0 = full)
 
 // ── Sampling seeds ────────────────────────────────────────────────────────────
 // Different seeds ensure partial overlap between client and server sets.

@@ -21,6 +21,9 @@ static std::vector<std::string> load_dataset(const std::string& path, size_t sam
     while (std::getline(in, line))
         if (!line.empty()) universe.push_back(line);
 
+    if (UNIVERSE_SIZE > 0 && UNIVERSE_SIZE < universe.size())
+        universe.resize(UNIVERSE_SIZE);
+
     if (sample_size > universe.size())
         throw std::runtime_error("Sample size exceeds universe size.");
 
