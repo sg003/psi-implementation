@@ -16,6 +16,11 @@ static void send_string(sock_t fd, const std::string& s) {
 }
 
 int main() {
+#ifdef _WIN32
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
+
     GM gm;
 
     SignatureKeyPair ca_keys = generate_signature_keypair();
@@ -23,9 +28,6 @@ int main() {
     std::ofstream pub("ca_public.pem");
     pub << ca_keys.public_pem;
     pub.close();
-
-    std::cout << "CA public key written to ca_public.pem\n";
-    std::cout << "CA waiting on port " << CA_PORT << "...\n";
 
     sock_t server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { perror("socket"); return 1; }
@@ -40,6 +42,9 @@ int main() {
 
     if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return 1; }
     if (listen(server_fd, 1) < 0) { perror("listen"); return 1; }
+
+    std::cout << "CA public key written to ca_public.pem\n";
+    std::cout << "CA waiting on port " << CA_PORT << "...\n";
 
     sock_t client_fd = accept(server_fd, nullptr, nullptr);
     if (client_fd < 0) { perror("accept"); return 1; }
@@ -97,6 +102,8 @@ int main() {
 
     CLOSE_SOCKET(client_fd);
     CLOSE_SOCKET(server_fd);
-
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return 0;
 }

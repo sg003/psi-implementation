@@ -11,11 +11,13 @@ constexpr int      CA_PORT       = 9001;
 // ── Bloom filter / protocol ───────────────────────────────────────────────────
 // K doubles as the number of BF hash functions and the φ output length.
 // False positive rate = 1/2^K.  K=30 → negligible collisions with ≤10k elements.
-constexpr size_t   K             = 30;
+// inline (not constexpr) so experiment.cpp can set it at runtime via --k.
+inline size_t      K             = 30;
 
 // ── Set sizes ─────────────────────────────────────────────────────────────────
-constexpr size_t   SERVER_SET_SIZE = 100;   // v  (server's sample from the universe)
-constexpr size_t   CLIENT_SET_SIZE = 50;    // w  (client's sample from the universe)
+constexpr size_t   SERVER_SET_SIZE = 300;   // v  (server's sample from the universe)
+constexpr size_t   CLIENT_SET_SIZE = 300;    // w  (client's sample from the universe)
+constexpr size_t   UNIVERSE_SIZE   = 1000;   // cap dataset before sampling (0 = full)
 
 // ── Sampling seeds ────────────────────────────────────────────────────────────
 // Different seeds ensure partial overlap between client and server sets.
