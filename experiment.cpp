@@ -74,6 +74,7 @@ struct ExperimentConfig {
     bool        client_seed_fixed = false;
     bool        server_seed_fixed = false;
     size_t      k                 = K;
+    size_t      universe_size     = 0;   // 0 = full dataset
 };
 
 struct RunResult {
@@ -93,16 +94,19 @@ struct RunResult {
 
 // ── Dataset loading ───────────────────────────────────────────────────────────
 
-static std::vector<std::string> load_dataset(const std::string& path, size_t n, uint64_t seed) {
+static std::vector<std::string> load_dataset(const std::string& path, size_t n, uint64_t seed,
+                                              size_t universe_size = 0) {
     std::ifstream in(path);
     if (!in) throw std::runtime_error("Cannot open dataset: " + path);
     std::vector<std::string> all;
     std::string line;
     while (std::getline(in, line))
         if (!line.empty()) all.push_back(line);
+    if (universe_size > 0 && universe_size < all.size())
+        all.resize(universe_size);
     if (n > all.size())
         throw std::runtime_error("Sample size " + std::to_string(n) +
-                                 " exceeds dataset size " + std::to_string(all.size()));
+                                 " exceeds universe size " + std::to_string(all.size()));
     std::mt19937_64 rng(seed);
     std::shuffle(all.begin(), all.end(), rng);
     all.resize(n);
@@ -499,7 +503,8 @@ static ExperimentConfig parse_args(int argc, char* argv[]) {
         else if ((a == "--dataset"     || a == "-d") && i+1 < argc) cfg.dataset     =           argv[++i];
         else if  (a == "--client-seed"               && i+1 < argc) { cfg.client_seed = std::stoull(argv[++i]); cfg.client_seed_fixed = true; }
         else if  (a == "--server-seed"               && i+1 < argc) { cfg.server_seed = std::stoull(argv[++i]); cfg.server_seed_fixed = true; }
-        else if  (a == "-k"                          && i+1 < argc)   cfg.k = std::stoul(argv[++i]);
+        else if  (a == "-k"                          && i+1 < argc)   cfg.k             = std::stoul(argv[++i]);
+        else if  (a == "--universe"                  && i+1 < argc)   cfg.universe_size = std::stoul(argv[++i]);
         else if (a == "--help" || a == "-h") { print_usage(argv[0]); exit(0); }
         else { std::cerr << "Unknown argument: " << a << "\n"; print_usage(argv[0]); exit(1); }
     }
@@ -522,6 +527,7 @@ int main(int argc, char* argv[]) {
               << "K:           " << cfg.k           << "\n"
               << "Client size: " << cfg.client_size << "\n"
               << "Server size: " << cfg.server_size << "\n"
+              << "Universe:    " << (cfg.universe_size > 0 ? std::to_string(cfg.universe_size) : "full") << "\n"
               << "Runs:        " << cfg.runs        << "\n"
               << "Output:      " << cfg.output_file << "\n"
               << "Dataset:     " << cfg.dataset     << "\n"
@@ -562,8 +568,8 @@ int main(int argc, char* argv[]) {
         uint64_t run_client_seed = cfg.client_seed_fixed ? cfg.client_seed : seed_rng();
         uint64_t run_server_seed = cfg.server_seed_fixed ? cfg.server_seed : seed_rng();
 
-        auto X = load_dataset(cfg.dataset, cfg.server_size, run_server_seed);
-        auto Y = load_dataset(cfg.dataset, cfg.client_size, run_client_seed);
+        auto X = load_dataset(cfg.dataset, cfg.server_size, run_server_seed, cfg.universe_size);
+        auto Y = load_dataset(cfg.dataset, cfg.client_size, run_client_seed, cfg.universe_size);
         auto ground_truth = compute_ground_truth(X, Y);
 
         std::cout << "[Run " << run << "] client_seed=" << run_client_seed
