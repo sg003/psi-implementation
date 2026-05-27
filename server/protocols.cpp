@@ -55,6 +55,15 @@ static std::vector<mpz_class> recv_encrypted_bf(sock_t fd) {
     return encrypted_bf;
 }
 
+static bool verify_ca_certificate(
+    const std::string& ca_public_key_pem,
+    const std::vector<unsigned char>& signature,
+    const std::vector<mpz_class>& encrypted_bf
+) {
+    std::vector<unsigned char> message = serialize_encrypted_bf(encrypted_bf);
+    return verify_signature(ca_public_key_pem, message, signature);
+}
+
 static void process_encrypted_bf_for_cardinality(sock_t fd, const std::vector<std::string>& X,
                                                   const GMPublicKey& pk,
                                                   const std::vector<mpz_class>& encrypted_bf) {
@@ -201,4 +210,72 @@ void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublic
             timing->bytes_sent += mpz_wire_bytes(c);
 }
 
-void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v) {}
+void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk,
+                 uint32_t v, ServerTiming* timing) {
+    ServerTiming _t;
+    if (!timing) timing = &_t;
+
+    auto t_total = Clock::now();
+
+    auto t0 = Clock::now();
+    std::string ca_public_key_pem = recv_string(fd);
+
+    std::vector<unsigned char> signature = recv_bytes(fd);
+
+    uint32_t m32 = 0;
+    recv_all(fd, &m32, sizeof(m32));
+    size_t m = static_cast<size_t>(m32);
+
+    std::vector<mpz_class> encrypted_bf(m);
+    for (size_t i = 0; i < m; i++)
+        recv_mpz(fd, encrypted_bf[i]);
+
+    auto t1 = Clock::now();
+    timing->recv_bf_ms = elapsed_ms(t0, t1);
+    timing->bytes_recv = sizeof(uint32_t) + ca_public_key_pem.size()
+                       + sizeof(uint32_t) + signature.size()
+                       + sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_recv += mpz_wire_bytes(c);
+
+    auto t2 = Clock::now();
+
+    if (!verify_ca_certificate(ca_public_key_pem, signature, encrypted_bf)) {
+        std::cerr << "APSI signature verification failed. Aborting.\n";
+        auto t_fail = Clock::now();
+        timing->compute_ms = elapsed_ms(t2, t_fail);
+        timing->total_ms = elapsed_ms(t_total, t_fail);
+        return;
+    }
+
+    std::cout << "APSI signature verified." << std::endl;
+
+    GM gm;
+    std::vector<std::vector<mpz_class>> all_responses;
+    all_responses.reserve(X.size());
+    for (const auto& raw_si : X) {
+        std::string s_kbit(K, '0');
+        for (size_t j = 0; j < K; j++) {
+            s_kbit[j] = '0' + phi_bit(raw_si, j);
+        }
+
+        std::vector<mpz_class> result(K);
+        for (size_t j = 0; j < K; j++) {
+            size_t index = bf_hash(s_kbit, j, m);
+            int bit = s_kbit[j] - '0';
+            result[j] = gm.homomorphic_xor(pk, encrypted_bf[index], gm.encrypt_bit(pk, bit));
+        }
+        all_responses.push_back(std::move(result));
+    }
+
+    auto t3 = Clock::now();
+    timing->compute_ms = elapsed_ms(t2, t3);
+    auto t4 = Clock::now();
+    for (const auto& resp : all_responses)
+        for (const auto& c : resp) {
+            send_mpz(fd, c);
+            timing->bytes_sent += mpz_wire_bytes(c);
+        }
+    auto t5 = Clock::now();
+    timing->send_ms = elapsed_ms(t4, t5);
+    timing->total_ms = elapsed_ms(t_total, t5);
+}

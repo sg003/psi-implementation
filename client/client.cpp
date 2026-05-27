@@ -9,6 +9,7 @@
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <stdexcept>
 
 
 static std::vector<std::string> load_dataset(const std::string& path, size_t sample_size, uint64_t seed) {
@@ -32,7 +33,7 @@ static std::vector<std::string> load_dataset(const std::string& path, size_t sam
 int                      client_psi_ca (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, ClientTiming* timing = nullptr);
 std::vector<std::string> client_psi    (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, ClientTiming* timing = nullptr);
 int                      client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port, ClientTiming* timing = nullptr);
-void                     client_apsi   (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v);
+std::vector<std::string> client_apsi   (sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port, ClientTiming* timing = nullptr);
 
 GM gm;
 GMPublicKey pk;
@@ -42,7 +43,7 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: ./client <protocol> [ca_host ca_port]\n";
         std::cerr << "Protocols: psi_ca | psi | apsi_ca | apsi\n";
-        std::cerr << "For apsi_ca, provide CA host and port as extra arguments.\n";
+        std::cerr << "For apsi_ca or apsi, provide CA host and port as extra arguments.\n";
         return 1;
     }
     std::string protocol = argv[1];
@@ -95,7 +96,21 @@ int main(int argc, char* argv[]) {
         }
         client_apsi_ca(fd, gm, pk, sk, Y, v, argv[2], std::stoi(argv[3]));
     }
-    else if (protocol == "apsi") client_apsi(fd, gm, pk, sk, Y, v);
+    else if (protocol == "apsi") {
+        if (argc < 4) {
+            std::cerr << "For apsi_ca, provide CA host and port as arguments.\n";
+            CLOSE_SOCKET(fd);
+            return 1;
+        }
+        auto intersection = client_apsi(fd, gm, pk, sk, Y, v, argv[2], std::stoi(argv[3]));
+        std::cout << "Intersection size: " << intersection.size() << "\n";
+        std::ofstream f("apsi_intersection.txt");
+        for (const auto& e : intersection) {
+            std::cout << "  " << e << "\n";
+            f << e << "\n";
+        }
+        std::cout << "Intersection written to apsi_intersection.txt\n";
+    }
     else { std::cerr << "Unknown protocol: " << protocol << "\n"; CLOSE_SOCKET(fd); return 1; }
 
     CLOSE_SOCKET(fd);

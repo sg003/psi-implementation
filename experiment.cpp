@@ -50,12 +50,12 @@ static double elapsed_ms(Clock::time_point a, Clock::time_point b) {
 int                      client_psi_ca (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, ClientTiming* = nullptr);
 std::vector<std::string> client_psi    (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, ClientTiming* = nullptr);
 int                      client_apsi_ca(sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, const std::string&, int, ClientTiming* = nullptr);
-void                     client_apsi   (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t);
+std::vector<std::string> client_apsi   (sock_t, GM&, const GMPublicKey&, const GMSecretKey&, const std::vector<std::string>&, uint32_t, const std::string&, int, ClientTiming* = nullptr);
 
 void server_psi_ca (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
 void server_psi    (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
 void server_apsi_ca(sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
-void server_apsi   (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t);
+void server_apsi   (sock_t, const std::vector<std::string>&, const GMPublicKey&, uint32_t, ServerTiming* = nullptr);
 
 // ── Config & result structs ───────────────────────────────────────────────────
 
@@ -148,9 +148,9 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
     if (listen(listen_fd, 1) < 0)
         throw std::runtime_error("listen() failed");
 
-    // ── CA socket (apsi_ca only) ──────────────────────────────────────────────
+    // ── CA socket (apsi_ca / apsi) ────────────────────────────────────────────
     sock_t ca_listen_fd = (sock_t)-1;
-    if (cfg.protocol == "apsi_ca") {
+    if (cfg.protocol == "apsi_ca" || cfg.protocol == "apsi") {
         ca_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (ca_listen_fd < 0) throw std::runtime_error("CA socket() failed");
         int ca_opt = 1;
@@ -185,7 +185,7 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
             if      (cfg.protocol == "psi_ca")  server_psi_ca (conn_fd, X, srv_pk, v, &st);
             else if (cfg.protocol == "psi")      server_psi    (conn_fd, X, srv_pk, v, &st);
             else if (cfg.protocol == "apsi_ca")  server_apsi_ca(conn_fd, X, srv_pk, v, &st);
-            else if (cfg.protocol == "apsi")     server_apsi   (conn_fd, X, srv_pk, v);
+            else if (cfg.protocol == "apsi")     server_apsi   (conn_fd, X, srv_pk, v, &st);
 
             CLOSE_SOCKET(conn_fd);
             srv_promise.set_value(st);
@@ -194,10 +194,10 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
         }
     });
 
-    // ── CA thread (apsi_ca only) ──────────────────────────────────────────────
+    // ── CA thread (apsi_ca / apsi) ──────────────────────────────────────────────
     std::thread ca_thread;
     std::exception_ptr ca_exception;
-    if (cfg.protocol == "apsi_ca") {
+    if (cfg.protocol == "apsi_ca" || cfg.protocol == "apsi") {
         ca_thread = std::thread([ca_listen_fd, &ca_exception]() {
             try {
                 sock_t ca_client_fd = accept(ca_listen_fd, nullptr, nullptr);
@@ -295,11 +295,17 @@ static RunResult run_experiment(int run_idx, const ExperimentConfig& cfg,
             ? static_cast<double>(res.false_positives) / res.result_size : 0.0;
     }
     else if (cfg.protocol == "apsi") {
-        std::cerr << "[WARN] apsi is not implemented; skipping.\n";
-        res.result_size    = -1;
-        res.false_positives = -1;
-        res.false_negatives = -1;
-        res.fp_rate         = -1.0;
+        res.intersection = client_apsi(client_fd, gm, pk, sk, Y, v, "127.0.0.1", CA_PORT, &ct);
+        res.result_size  = static_cast<int>(res.intersection.size());
+
+        std::set<std::string> output_set(res.intersection.begin(), res.intersection.end());
+        for (const auto& elem : res.intersection)
+            if (!ground_truth.count(elem)) res.false_positives++;
+        for (const auto& elem : ground_truth)
+            if (!output_set.count(elem))   res.false_negatives++;
+
+        res.fp_rate = res.result_size > 0
+            ? static_cast<double>(res.false_positives) / res.result_size : 0.0;
     }
 
     res.client = ct;
