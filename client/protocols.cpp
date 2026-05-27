@@ -1,18 +1,28 @@
 #include "../gm.hpp"
 #include "../net.hpp"
 #include "../bloom_filter.hpp"
+#include "../timing.hpp"
+
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <iostream>
+#include <chrono>
 
-static std::unordered_map<std::string, std::string> build_phi_map(const std::vector<std::string>& Y) {
-    std::unordered_map<std::string, std::string> phi_map;
+using Clock = std::chrono::high_resolution_clock;
+using ms_f  = std::chrono::duration<double, std::milli>;
+
+static double elapsed_ms(Clock::time_point a, Clock::time_point b) {
+    return ms_f(b - a).count();
+}
+
+static std::unordered_map<std::string, std::vector<std::string>> build_phi_map(const std::vector<std::string>& Y) {
+    std::unordered_map<std::string, std::vector<std::string>> phi_map;
     for (const auto& ci : Y) {
         std::string phi_ci(K, '0');
         for (size_t j = 0; j < K; j++)
             phi_ci[j] = '0' + phi_bit(ci, j);
-        phi_map[phi_ci] = ci;
+        phi_map[phi_ci].push_back(ci);
     }
     return phi_map;
 }
@@ -24,81 +34,25 @@ static std::string decrypt_group(GM& gm, const GMSecretKey& sk, const std::vecto
     return bits;
 }
 
-std::string recv_string(sock_t fd);
-
-struct CACertificate {
-    std::string public_key_pem;
-    std::vector<unsigned char> signature;
-    std::vector<mpz_class> encrypted_bf;
-};
-
-static sock_t connect_to_ca(const std::string& ca_host, int ca_port) {
-    sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (ca_fd < 0) { perror("socket"); exit(1); }
-
-    sockaddr_in ca_addr{};
-    ca_addr.sin_family = AF_INET;
-    ca_addr.sin_port = htons(ca_port);
-    if (inet_pton(AF_INET, ca_host.c_str(), &ca_addr.sin_addr) <= 0) {
-        std::cerr << "Invalid CA host address\n";
-        exit(1);
-    }
-    if (connect(ca_fd, (sockaddr*)&ca_addr, sizeof(ca_addr)) < 0) { perror("connect to CA"); exit(1); }
-
-    return ca_fd;
+static std::string recv_string(sock_t fd) {
+    uint32_t size = 0;
+    recv_all(fd, &size, sizeof(size));
+    std::string s(size, '\0');
+    if (size > 0) recv_all(fd, s.data(), size);
+    return s;
 }
 
-static CACertificate fetch_ca_certificate(
-    sock_t ca_fd,
-    const GMPublicKey& pk,
-    const std::vector<std::string>& client_set,
-    uint32_t v
-) {
-    CACertificate cert;
-
-    send_mpz(ca_fd, pk.n);
-    send_mpz(ca_fd, pk.u);
-
-    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
-    send_all(ca_fd, &m, sizeof(m));
-
-    uint32_t set_size = static_cast<uint32_t>(client_set.size());
-    send_all(ca_fd, &set_size, sizeof(set_size));
-    for (const auto& item : client_set) {
-        uint32_t len = static_cast<uint32_t>(item.size());
-        send_all(ca_fd, &len, sizeof(len));
-        send_all(ca_fd, item.data(), len);
-    }
-
-    uint32_t sig_size = 0;
-    recv_all(ca_fd, &sig_size, sizeof(sig_size));
-    cert.signature.resize(sig_size);
-    recv_all(ca_fd, cert.signature.data(), sig_size);
-
-    uint32_t bf_size = 0;
-    recv_all(ca_fd, &bf_size, sizeof(bf_size));
-    cert.encrypted_bf.resize(bf_size);
-    for (uint32_t i = 0; i < bf_size; ++i) {
-        recv_mpz(ca_fd, cert.encrypted_bf[i]);
-    }
-
-    cert.public_key_pem = recv_string(ca_fd);
-    return cert;
-}
-
-std::vector<mpz_class> build_and_encrypt_bf(GM& gm, const GMPublicKey& pk, const std::vector<std::string>& Y, size_t m, size_t k){
+std::vector<mpz_class> build_and_encrypt_bf(GM& gm, const GMPublicKey& pk, const std::vector<std::string>& Y, size_t m, size_t k) {
     BloomFilter bf = bf_init(m, k);
-    for (const auto& item : Y){
+    for (const auto& item : Y)
         bf_add(bf, item);
-    }
     std::vector<mpz_class> encrypted_bf;
-    for( size_t t = 0; t<m;t++){
+    for (size_t t = 0; t < m; t++)
         encrypted_bf.push_back(gm.encrypt_bit(pk, bf.bits[t]));
-    }
     return encrypted_bf;
 }
 
-void send_encrypted_bf(sock_t fd, const std::vector<mpz_class>& encrypted_bf){
+void send_encrypted_bf(sock_t fd, const std::vector<mpz_class>& encrypted_bf) {
     uint32_t size = encrypted_bf.size();
     send_all(fd, &size, sizeof(size));
     for (const auto& b : encrypted_bf)
@@ -117,79 +71,46 @@ std::vector<std::vector<mpz_class>> recv_server_response(sock_t fd, size_t v, si
     return response;
 }
 
-int client_psi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {
-    size_t m = bf_optimal_size(v, K);
-    std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
-    send_encrypted_bf(fd, encrypted_bf);
-    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
-    int cardinality = 0;
-    for (const auto& e_si : response) {
-        bool all_zero = true;
-        for (const auto& ciphertext : e_si) {
-            if (gm.decrypt_bit(sk, ciphertext) != 0) {
-                all_zero = false;
-                break;
-            }
-        }
-        if (all_zero) cardinality++;
-    }
-    return cardinality;
-}
-
-void client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v) {
-    size_t m = bf_optimal_size(v, K);
-    std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
-    send_encrypted_bf(fd, encrypted_bf);
-    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
-
-    auto phi_map = build_phi_map(Y);
-
-    std::vector<std::string> intersection;
-    for (const auto& e_si : response) {
-        auto it = phi_map.find(decrypt_group(gm, sk, e_si));
-        if (it != phi_map.end())
-            intersection.push_back(it->second);
-    }
-
-    std::cout << "Intersection size: " << intersection.size() << "\n";
-    for (const auto& elem : intersection)
-        std::cout << "  " << elem << "\n";
-}
-
-
-void send_bytes(sock_t fd, const std::vector<unsigned char>& data) {
+static void send_bytes(sock_t fd, const std::vector<unsigned char>& data) {
     uint32_t size = static_cast<uint32_t>(data.size());
     send_all(fd, &size, sizeof(size));
     if (size > 0) send_all(fd, data.data(), size);
 }
 
-void send_string(sock_t fd, const std::string& s) {
+static void send_string(sock_t fd, const std::string& s) {
     uint32_t size = static_cast<uint32_t>(s.size());
     send_all(fd, &size, sizeof(size));
     if (size > 0) send_all(fd, s.data(), size);
 }
 
-std::string recv_string(sock_t fd) {
-    uint32_t size = 0;
-    recv_all(fd, &size, sizeof(size));
+int client_psi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk,
+                  const std::vector<std::string>& Y, uint32_t v, ClientTiming* timing) {
+    ClientTiming _t;
+    if (!timing) timing = &_t;
 
-    std::string s(size, '\0');
-    if (size > 0) recv_all(fd, s.data(), size);
-    return s;
-}
+    auto t_total = Clock::now();
 
+    size_t m = bf_optimal_size(v, K);
 
-void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port) {
-    sock_t ca_fd = connect_to_ca(ca_host, ca_port);
-    CACertificate cert = fetch_ca_certificate(ca_fd, pk, Y, v);
-    CLOSE_SOCKET(ca_fd);
+    auto t0 = Clock::now();
+    std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
+    auto t1 = Clock::now();
+    timing->bf_build_ms = elapsed_ms(t0, t1);
 
-    // Send to server
-    send_string(fd, cert.public_key_pem);
-    send_bytes(fd, cert.signature);
-    send_encrypted_bf(fd, cert.encrypted_bf);
+    auto t2 = Clock::now();
+    send_encrypted_bf(fd, encrypted_bf);
+    auto t3 = Clock::now();
+    timing->send_ms = elapsed_ms(t2, t3);
+    timing->bytes_sent = sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_sent += mpz_wire_bytes(c);
 
+    auto t4 = Clock::now();
     std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+    auto t5 = Clock::now();
+    timing->recv_ms = elapsed_ms(t4, t5);
+    for (const auto& g : response) for (const auto& c : g) timing->bytes_recv += mpz_wire_bytes(c);
+
+    auto t6 = Clock::now();
     int cardinality = 0;
     for (const auto& e_si : response) {
         bool all_zero = true;
@@ -201,48 +122,244 @@ void client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey&
         }
         if (all_zero) cardinality++;
     }
-    std::cout << "APSI-CA cardinality: " << cardinality << "\n";
+    auto t7 = Clock::now();
+    timing->decrypt_ms = elapsed_ms(t6, t7);
+    timing->total_ms   = elapsed_ms(t_total, t7);
+
+    return cardinality;
 }
 
-void client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port) {
-    sock_t ca_fd = connect_to_ca(ca_host, ca_port);
+std::vector<std::string> client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk,
+                                    const std::vector<std::string>& Y, uint32_t v, ClientTiming* timing) {
+    ClientTiming _t;
+    if (!timing) timing = &_t;
+
+    auto t_total = Clock::now();
+
+    size_t m = bf_optimal_size(v, K);
+
+    auto t0 = Clock::now();
+    std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
+    auto t1 = Clock::now();
+    timing->bf_build_ms = elapsed_ms(t0, t1);
+
+    auto t2 = Clock::now();
+    send_encrypted_bf(fd, encrypted_bf);
+    auto t3 = Clock::now();
+    timing->send_ms = elapsed_ms(t2, t3);
+    timing->bytes_sent = sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_sent += mpz_wire_bytes(c);
+
+    auto t4 = Clock::now();
+    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+    auto t5 = Clock::now();
+    timing->recv_ms = elapsed_ms(t4, t5);
+    for (const auto& g : response) for (const auto& c : g) timing->bytes_recv += mpz_wire_bytes(c);
+
+    auto phi_map = build_phi_map(Y);
+
+    auto t6 = Clock::now();
+    std::vector<std::string> intersection;
+    for (const auto& e_si : response) {
+        auto it = phi_map.find(decrypt_group(gm, sk, e_si));
+        if (it != phi_map.end())
+            for (const auto& elem : it->second)
+                intersection.push_back(elem);
+    }
+    auto t7 = Clock::now();
+    timing->decrypt_ms = elapsed_ms(t6, t7);
+    timing->total_ms   = elapsed_ms(t_total, t7);
+
+    return intersection;
+}
+
+int client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk,
+                   const std::vector<std::string>& Y, uint32_t v,
+                   const std::string& ca_host, int ca_port, ClientTiming* timing) {
+    ClientTiming _t;
+    if (!timing) timing = &_t;
+
+    auto t_total = Clock::now();
+
+    // ── CA round-trip (connect, send set, receive certified BF) ──────────────
+    auto t0 = Clock::now();
+    sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (ca_fd < 0) { perror("socket"); exit(1); }
+    sockaddr_in ca_addr{};
+    ca_addr.sin_family = AF_INET;
+    ca_addr.sin_port   = htons(ca_port);
+    if (inet_pton(AF_INET, ca_host.c_str(), &ca_addr.sin_addr) <= 0) {
+        std::cerr << "Invalid CA host address\n"; exit(1);
+    }
+    if (connect(ca_fd, (sockaddr*)&ca_addr, sizeof(ca_addr)) < 0) {
+        perror("connect to CA"); exit(1);
+    }
+
+    send_mpz(ca_fd, pk.n);
+    send_mpz(ca_fd, pk.u);
+    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
+    send_all(ca_fd, &m, sizeof(m));
+    uint32_t y_size = Y.size();
+    send_all(ca_fd, &y_size, sizeof(y_size));
+    for (const auto& item : Y) {
+        uint32_t len = item.size();
+        send_all(ca_fd, &len, sizeof(len));
+        send_all(ca_fd, item.data(), len);
+    }
+
+    uint32_t sig_size = 0;
+    recv_all(ca_fd, &sig_size, sizeof(sig_size));
+    std::vector<unsigned char> signature(sig_size);
+    recv_all(ca_fd, signature.data(), sig_size);
+
+    uint32_t bf_size = 0;
+    recv_all(ca_fd, &bf_size, sizeof(bf_size));
+    std::vector<mpz_class> encrypted_bf(bf_size);
+    for (uint32_t i = 0; i < bf_size; ++i)
+        recv_mpz(ca_fd, encrypted_bf[i]);
+
+    std::string ca_public_key_pem = recv_string(ca_fd);
+    CLOSE_SOCKET(ca_fd);
+    auto t1 = Clock::now();
+    timing->bf_build_ms = elapsed_ms(t0, t1);
+
+    // ── Send certified BF to PSI server ──────────────────────────────────────
+    auto t2 = Clock::now();
+    send_string(fd, ca_public_key_pem);
+    send_bytes(fd, signature);
+    send_encrypted_bf(fd, encrypted_bf);
+    auto t3 = Clock::now();
+    timing->send_ms = elapsed_ms(t2, t3);
+    timing->bytes_sent = sizeof(uint32_t) + ca_public_key_pem.size()
+                       + sizeof(uint32_t) + signature.size()
+                       + sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_sent += mpz_wire_bytes(c);
+
+    // ── Receive PSI server response ───────────────────────────────────────────
+    auto t4 = Clock::now();
+    std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
+    auto t5 = Clock::now();
+    timing->recv_ms = elapsed_ms(t4, t5);
+    for (const auto& g : response) for (const auto& c : g) timing->bytes_recv += mpz_wire_bytes(c);
+
+    // ── Decrypt ───────────────────────────────────────────────────────────────
+    auto t6 = Clock::now();
+    int cardinality = 0;
+    for (const auto& e_si : response) {
+        bool all_zero = true;
+        for (const auto& ciphertext : e_si) {
+            if (gm.decrypt_bit(sk, ciphertext) != 0) { all_zero = false; break; }
+        }
+        if (all_zero) cardinality++;
+    }
+    auto t7 = Clock::now();
+    timing->decrypt_ms = elapsed_ms(t6, t7);
+    timing->total_ms   = elapsed_ms(t_total, t7);
+
+    std::cout << "APSI-CA cardinality: " << cardinality << "\n";
+    return cardinality;
+}
+
+std::vector<std::string> client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& sk, const std::vector<std::string>& Y, uint32_t v, const std::string& ca_host, int ca_port, ClientTiming* timing) {
+    ClientTiming _t;
+    if (!timing) timing = &_t;
+
+    auto t_total = Clock::now();
+
+    // ── CA round-trip (connect, send set, receive certified BF) ──────────────
+    auto t0 = Clock::now();
+    sock_t ca_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (ca_fd < 0) { perror("socket"); exit(1); }
+
+    sockaddr_in ca_addr{};
+    ca_addr.sin_family = AF_INET;
+    ca_addr.sin_port   = htons(ca_port);
+    if (inet_pton(AF_INET, ca_host.c_str(), &ca_addr.sin_addr) <= 0) {
+        std::cerr << "Invalid CA host address\n";
+        exit(1);
+    }
+    if (connect(ca_fd, (sockaddr*)&ca_addr, sizeof(ca_addr)) < 0) {
+        perror("connect to CA");
+        exit(1);
+    }
 
     // 1. Build the mapping: K-bit string -> Raw string
     auto phi_map = build_phi_map(Y);
-    
+
     // 2. Extract strictly the K-bit strings to send to the CA
     std::vector<std::string> Y_hashed;
     Y_hashed.reserve(phi_map.size());
-    for (const auto& pair : phi_map) {
-        Y_hashed.push_back(pair.first); // pair.first is the K-bit string
+    for (const auto& pair : phi_map)
+        Y_hashed.push_back(pair.first);
+
+    send_mpz(ca_fd, pk.n);
+    send_mpz(ca_fd, pk.u);
+
+    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
+    send_all(ca_fd, &m, sizeof(m));
+
+    uint32_t y_size = static_cast<uint32_t>(Y_hashed.size());
+    send_all(ca_fd, &y_size, sizeof(y_size));
+    for (const auto& item : Y_hashed) {
+        uint32_t len = static_cast<uint32_t>(item.size());
+        send_all(ca_fd, &len, sizeof(len));
+        send_all(ca_fd, item.data(), len);
     }
 
-    CACertificate cert = fetch_ca_certificate(ca_fd, pk, Y_hashed, v);
+    uint32_t sig_size = 0;
+    recv_all(ca_fd, &sig_size, sizeof(sig_size));
+    std::vector<unsigned char> signature(sig_size);
+    recv_all(ca_fd, signature.data(), sig_size);
+
+    uint32_t bf_size = 0;
+    recv_all(ca_fd, &bf_size, sizeof(bf_size));
+    std::vector<mpz_class> encrypted_bf(bf_size);
+    for (uint32_t i = 0; i < bf_size; ++i)
+        recv_mpz(ca_fd, encrypted_bf[i]);
+
+    uint32_t pem_size = 0;
+    recv_all(ca_fd, &pem_size, sizeof(pem_size));
+    std::string ca_public_key_pem(pem_size, '\0');
+    if (pem_size > 0)
+        recv_all(ca_fd, ca_public_key_pem.data(), pem_size);
 
     CLOSE_SOCKET(ca_fd);
+    auto t1 = Clock::now();
+    timing->bf_build_ms = elapsed_ms(t0, t1);
 
-    // Send to server
-    send_string(fd, cert.public_key_pem);
-    send_bytes(fd, cert.signature);
-    send_encrypted_bf(fd, cert.encrypted_bf);
+    // ── Send certified BF to PSI server ──────────────────────────────────────
+    auto t2 = Clock::now();
+    send_string(fd, ca_public_key_pem);
+    send_bytes(fd, signature);
+    send_encrypted_bf(fd, encrypted_bf);
+    auto t3 = Clock::now();
+    timing->send_ms = elapsed_ms(t2, t3);
+    timing->bytes_sent = sizeof(uint32_t) + ca_public_key_pem.size()
+                       + sizeof(uint32_t) + signature.size()
+                       + sizeof(uint32_t);
+    for (const auto& c : encrypted_bf) timing->bytes_sent += mpz_wire_bytes(c);
 
+    // ── Receive PSI server response ──────────────────────────────────────────
+    auto t4 = Clock::now();
     std::vector<std::vector<mpz_class>> response = recv_server_response(fd, v, K);
-    
+    auto t5 = Clock::now();
+    timing->recv_ms = elapsed_ms(t4, t5);
+    for (const auto& g : response) for (const auto& c : g) timing->bytes_recv += mpz_wire_bytes(c);
+
+    // ── Decrypt ───────────────────────────────────────────────────────────────
+    auto t6 = Clock::now();
     std::vector<std::string> intersection;
-
     for (const auto& e_si : response) {
-        // d is the decrypted K-bit string
         std::string d = decrypt_group(gm, sk, e_si);
-
-        // Look up the K-bit string in our map
         auto it = phi_map.find(d);
-        if (it != phi_map.end()) {
-            // If found, push the original credit card string into the intersection
-            intersection.push_back(it->second);
-        }
+        if (it != phi_map.end())
+            for (const auto& s : it->second)
+                intersection.push_back(s);
     }
 
-    std::cout << "Intersection size: " << intersection.size() << "\n";
-    for (const auto& elem : intersection)
-        std::cout << "  " << elem << "\n";
+    auto t7 = Clock::now();
+    timing->decrypt_ms = elapsed_ms(t6, t7);
+    timing->total_ms   = elapsed_ms(t_total, t7);
+
+    return intersection;
 }

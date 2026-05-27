@@ -1,6 +1,8 @@
+#include "../config.hpp"
 #include "../net.hpp"
 #include "../gm.hpp"
 #include "../bloom_filter.hpp"
+#include "../timing.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -9,7 +11,6 @@
 #include <random>
 #include <algorithm>
 
-const uint64_t SEED = 2;
 
 static std::vector<std::string> load_dataset(const std::string& path, size_t sample_size, uint64_t seed) {
     std::ifstream in(path);
@@ -29,10 +30,10 @@ static std::vector<std::string> load_dataset(const std::string& path, size_t sam
     return universe;
 }
 
-void server_psi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
-void server_psi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
-void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
-void server_apsi(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v);
+void server_psi_ca (sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* timing = nullptr);
+void server_psi    (sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* timing = nullptr);
+void server_apsi_ca(sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* timing = nullptr);
+void server_apsi   (sock_t fd, const std::vector<std::string>& X, const GMPublicKey& pk, uint32_t v, ServerTiming* = nullptr);
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -67,7 +68,8 @@ int main(int argc, char* argv[]) {
     if (conn_fd < 0) { perror("accept"); return 1; }
     std::cout << "Client connected.\n";
 
-    std::vector<std::string> X = load_dataset("cards.txt", 100, SEED);
+    std::vector<std::string> X = load_dataset(DATASET_PATH, SERVER_SET_SIZE, SERVER_SEED);
+    { std::ofstream f("server_set.txt"); for (const auto& s : X) f << s << "\n"; }
 
     GMPublicKey pk;
     recv_mpz(conn_fd, pk.n);
