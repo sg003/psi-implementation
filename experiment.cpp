@@ -15,6 +15,7 @@
 //   --dataset     <path>                     (default: config DATASET_PATH)
 //   --client-seed <uint64>                   (default: random per run)
 //   --server-seed <uint64>                   (default: random per run)
+//   -k            <uint>                     (default: 30)
 //
 
 #include "config.hpp"
@@ -72,6 +73,7 @@ struct ExperimentConfig {
     uint64_t    server_seed       = SERVER_SEED;
     bool        client_seed_fixed = false;
     bool        server_seed_fixed = false;
+    size_t      k                 = K;
 };
 
 struct RunResult {
@@ -369,7 +371,7 @@ static void write_intersection_file(const RunResult& r, const ExperimentConfig& 
 }
 
 static void write_csv_header(std::ofstream& f) {
-    f << "protocol,client_size,server_size,run,client_seed,server_seed,"
+    f << "protocol,k,client_size,server_size,run,client_seed,server_seed,"
          "keygen_ms,bf_build_ms,client_send_ms,"
          "server_recv_ms,server_compute_ms,server_send_ms,"
          "client_recv_ms,decrypt_ms,total_client_ms,total_server_ms,"
@@ -379,6 +381,7 @@ static void write_csv_header(std::ofstream& f) {
 
 static void write_csv_row(std::ofstream& f, const ExperimentConfig& cfg, const RunResult& r) {
     f << cfg.protocol    << ","
+      << cfg.k          << ","
       << cfg.client_size << ","
       << cfg.server_size << ","
       << r.run           << ","
@@ -438,6 +441,7 @@ static void write_csv_avg_row(std::ofstream& f, const ExperimentConfig& cfg,
     std::string cs_col = cfg.client_seed_fixed ? std::to_string(cfg.client_seed) : "";
     std::string ss_col = cfg.server_seed_fixed ? std::to_string(cfg.server_seed) : "";
     f << cfg.protocol    << ","
+      << cfg.k          << ","
       << cfg.client_size << ","
       << cfg.server_size << ","
       << "avg"           << ","
@@ -479,7 +483,8 @@ static void print_usage(const char* prog) {
         << "  --output      <file.csv>                  (default: results.csv)\n"
         << "  --dataset     <path>                      (default: " << DATASET_PATH << ")\n"
         << "  --client-seed <uint64>                    (default: random per run)\n"
-        << "  --server-seed <uint64>                    (default: random per run)\n";
+        << "  --server-seed <uint64>                    (default: random per run)\n"
+        << "  -k            <uint>                      (default: " << K << ")\n";
 }
 
 static ExperimentConfig parse_args(int argc, char* argv[]) {
@@ -494,6 +499,7 @@ static ExperimentConfig parse_args(int argc, char* argv[]) {
         else if ((a == "--dataset"     || a == "-d") && i+1 < argc) cfg.dataset     =           argv[++i];
         else if  (a == "--client-seed"               && i+1 < argc) { cfg.client_seed = std::stoull(argv[++i]); cfg.client_seed_fixed = true; }
         else if  (a == "--server-seed"               && i+1 < argc) { cfg.server_seed = std::stoull(argv[++i]); cfg.server_seed_fixed = true; }
+        else if  (a == "-k"                          && i+1 < argc)   cfg.k = std::stoul(argv[++i]);
         else if (a == "--help" || a == "-h") { print_usage(argv[0]); exit(0); }
         else { std::cerr << "Unknown argument: " << a << "\n"; print_usage(argv[0]); exit(1); }
     }
@@ -509,9 +515,11 @@ int main(int argc, char* argv[]) {
 #endif
 
     ExperimentConfig cfg = parse_args(argc, argv);
+    K = cfg.k;  // propagate to all protocol TUs via inline global
 
     std::cout << "=== PSI Experiment Runner ===\n"
               << "Protocol:    " << cfg.protocol    << "\n"
+              << "K:           " << cfg.k           << "\n"
               << "Client size: " << cfg.client_size << "\n"
               << "Server size: " << cfg.server_size << "\n"
               << "Runs:        " << cfg.runs        << "\n"
