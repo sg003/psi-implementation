@@ -7,15 +7,17 @@
 //
 // Usage:
 //   ./experiment [options]
-//   --protocol    psi|psi_ca|apsi|apsi_ca   (default: psi)
-//   --client      <size>                     (default: config CLIENT_SET_SIZE)
-//   --server      <size>                     (default: config SERVER_SET_SIZE)
-//   --runs        <count>                    (default: 1)
-//   --output      <file.csv>                 (default: results.csv)
-//   --dataset     <path>                     (default: config DATASET_PATH)
-//   --client-seed <uint64>                   (default: random per run)
-//   --server-seed <uint64>                   (default: random per run)
-//   -k            <uint>                     (default: 30)
+//   --protocol/-p  <psi|psi_ca|apsi|apsi_ca>
+//   --client/-c    <size>
+//   --server/-s    <size>
+//   -k             <uint>
+//   --universe     <size>
+//   --runs/-r      <count>
+//   --output/-o    <file.csv>
+//   --dataset/-d   <path>
+//   --client-seed  <uint64>
+//   --server-seed  <uint64>
+//   --help/-h
 //
 
 #include "config.hpp"
@@ -480,15 +482,17 @@ static void write_csv_avg_row(std::ofstream& f, const ExperimentConfig& cfg,
 static void print_usage(const char* prog) {
     std::cerr
         << "Usage: " << prog << " [options]\n"
-        << "  --protocol    <psi|psi_ca|apsi|apsi_ca>  (default: psi)\n"
-        << "  --client      <size>                      (default: " << CLIENT_SET_SIZE << ")\n"
-        << "  --server      <size>                      (default: " << SERVER_SET_SIZE << ")\n"
-        << "  --runs        <count>                     (default: 1)\n"
-        << "  --output      <file.csv>                  (default: results.csv)\n"
-        << "  --dataset     <path>                      (default: " << DATASET_PATH << ")\n"
-        << "  --client-seed <uint64>                    (default: random per run)\n"
-        << "  --server-seed <uint64>                    (default: random per run)\n"
-        << "  -k            <uint>                      (default: " << K << ")\n";
+        << "  --protocol/-p  <psi|psi_ca|apsi|apsi_ca>  (default: " << EXP_PROTOCOL     << ")\n"
+        << "  --client/-c    <size>                      (default: " << CLIENT_SET_SIZE   << ")\n"
+        << "  --server/-s    <size>                      (default: " << SERVER_SET_SIZE   << ")\n"
+        << "  -k             <uint>                      (default: " << K                 << ")\n"
+        << "  --universe     <size>                      (default: full dataset)\n"
+        << "  --runs/-r      <count>                     (default: " << EXP_RUNS          << ")\n"
+        << "  --output/-o    <file.csv>                  (default: " << EXP_OUTPUT        << ")\n"
+        << "  --dataset/-d   <path>                      (default: " << DATASET_PATH      << ")\n"
+        << "  --client-seed  <uint64>                    (default: random per run)\n"
+        << "  --server-seed  <uint64>                    (default: random per run)\n"
+        << "  --help/-h\n";
 }
 
 static ExperimentConfig parse_args(int argc, char* argv[]) {

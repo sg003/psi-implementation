@@ -74,14 +74,19 @@ make experiment
 
 ### Flags
 
-| Flag | Default (config.hpp) |
-|---|---|
-| `--protocol` | `EXP_PROTOCOL` |
-| `--client` | `CLIENT_SET_SIZE` |
-| `--server` | `SERVER_SET_SIZE` |
-| `--runs` | `EXP_RUNS` |
-| `--output` | `EXP_OUTPUT` |
-| `--dataset` | `DATASET_PATH` |
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--protocol` | `-p` | `psi` | Protocol: `psi` \| `psi_ca` \| `apsi` \| `apsi_ca` |
+| `--client` | `-c` | `CLIENT_SET_SIZE` | Client set size |
+| `--server` | `-s` | `SERVER_SET_SIZE` | Server set size |
+| `-k` | | `K` (30) | BF hash count and φ output length. FPR = 1/2^k |
+| `--universe` | | full dataset | Cap dataset before sampling — set to `3×max(client,server)` for meaningful intersections |
+| `--runs` | `-r` | `EXP_RUNS` | Number of runs to average over |
+| `--output` | `-o` | `EXP_OUTPUT` | CSV output file (`_avg` variant written alongside) |
+| `--dataset` | `-d` | `DATASET_PATH` | Path to dataset file |
+| `--client-seed` | | random | Fix client sampling seed for reproducibility |
+| `--server-seed` | | random | Fix server sampling seed for reproducibility |
+| `--help` | `-h` | | Print usage |
 
 ### Output files
 
@@ -96,6 +101,31 @@ The CSV includes `total_bytes`. To derive transmission time for a given bandwidt
 transmission_ms = (total_bytes × 8) / bandwidth_bps × 1000
 total_time_ms   = compute_time_ms + transmission_ms
 ```
+
+## Running Experiments
+
+`run_experiments.sh` runs a series of automated sweeps and writes per-run and averaged CSVs.
+
+```bash
+bash run_experiments.sh
+```
+
+The script defines four sweeps (comment/uncomment to enable):
+
+| Sweep | What varies | Fixed | Output files |
+|---|---|---|---|
+| A | Set size (2^8 → 2^16) | K=40, equal client/server | `results_<proto>.csv` |
+| B | K (15 → 40) | size=2^10 | `results_k_<proto>.csv` |
+| C | Client size (2^8 → 2^16) | server=2^14 | `results_varying_client_<proto>.csv` |
+| D | Server size (2^8 → 2^16) | client=2^14 | `results_varying_server_<proto>.csv` |
+
+Each sweep runs all four protocols (`psi`, `psi_ca`, `apsi`, `apsi_ca`) with a 5-minute cooldown between protocols to avoid thermal throttling. Top-of-file variables to adjust:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `RUNS` | 10 | Runs per configuration |
+| `K_FIXED` | 40 | K used in all sweeps |
+| `DATASET` | `cards.txt` | Dataset file |
 
 ## Testing
 
