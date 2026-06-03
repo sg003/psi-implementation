@@ -90,7 +90,7 @@ int client_psi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& s
 
     auto t_total = Clock::now();
 
-    size_t m = bf_optimal_size(v, K);
+    size_t m = bf_optimal_size(Y.size(), K);
 
     auto t0 = Clock::now();
     std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
@@ -136,7 +136,7 @@ std::vector<std::string> client_psi(sock_t fd, GM& gm, const GMPublicKey& pk, co
 
     auto t_total = Clock::now();
 
-    size_t m = bf_optimal_size(v, K);
+    size_t m = bf_optimal_size(Y.size(), K);
 
     auto t0 = Clock::now();
     std::vector<mpz_class> encrypted_bf = build_and_encrypt_bf(gm, pk, Y, m, K);
@@ -197,7 +197,7 @@ int client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& 
 
     send_mpz(ca_fd, pk.n);
     send_mpz(ca_fd, pk.u);
-    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
+    uint32_t m = static_cast<uint32_t>(bf_optimal_size(Y.size(), K));
     send_all(ca_fd, &m, sizeof(m));
     uint32_t y_size = Y.size();
     send_all(ca_fd, &y_size, sizeof(y_size));
@@ -295,7 +295,7 @@ std::vector<std::string> client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, c
     send_mpz(ca_fd, pk.n);
     send_mpz(ca_fd, pk.u);
 
-    uint32_t m = static_cast<uint32_t>(bf_optimal_size(v, K));
+    uint32_t m = static_cast<uint32_t>(bf_optimal_size(Y_hashed.size(), K));
     send_all(ca_fd, &m, sizeof(m));
 
     uint32_t y_size = static_cast<uint32_t>(Y_hashed.size());

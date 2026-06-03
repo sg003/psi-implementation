@@ -14,5 +14,5 @@ server_set.txt
 /experiment
 *.exe
 ca_public.pem
-results.csv
+*.csv
 psi_ca_authority
