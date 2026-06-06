@@ -3,7 +3,7 @@ set -e
 
 BINARY="./experiment"
 DATASET="cards.txt"
-RUNS=10
+RUNS=5
 K_FIXED=40
 
 # ── Sweep A: set size sweep ───────────────────────────────────────────────────
@@ -13,9 +13,8 @@ K_FIXED=40
 echo "=== Sweep A: set size (2^8 to 2^16, step 2^2) ==="
 
 SIZE_EXPONENTS=(8 10 12 14 16)
-K_FIXED=40
 
-for proto in psi_ca psi apsi_ca apsi; do
+for proto in apsi_ca apsi; do
     output="results_${proto}.csv"
     for exp in "${SIZE_EXPONENTS[@]}"; do
         size=$((1 << exp))
@@ -25,7 +24,7 @@ for proto in psi_ca psi apsi_ca apsi; do
         "$BINARY" \
             --protocol "$proto"    \
             --client   "$size"     \
-            --server   ""     \
+            --server   "$size" \
             -k         "$K_FIXED"  \
             --universe "$universe" \
             --runs     "$RUNS"     \

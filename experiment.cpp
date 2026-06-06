@@ -356,7 +356,12 @@ static void print_run_summary(const ExperimentConfig& cfg, const RunResult& r) {
               << "  Total server:     " << r.server.total_ms     << " ms\n"
               << "  Client->Server:   " << r.client.bytes_sent / 1024.0 << " KB\n"
               << "  Server->Client:   " << r.server.bytes_sent / 1024.0 << " KB\n"
-              << "  Total comm:       " << (r.client.bytes_sent + r.server.bytes_sent) / 1024.0 << " KB\n"
+              << (r.client.bytes_ca_send > 0
+                  ? "  Client->CA:       " + std::to_string(r.client.bytes_ca_send / 1024.0) + " KB\n"
+                    "  CA->Client:       " + std::to_string(r.client.bytes_ca_recv / 1024.0) + " KB\n"
+                  : "")
+              << "  Total comm:       " << (r.client.bytes_sent + r.server.bytes_sent
+                                          + r.client.bytes_ca_send + r.client.bytes_ca_recv) / 1024.0 << " KB\n"
               << "  Result size:      " << r.result_size          << "\n"
               << "  True intersect:   " << r.true_intersection    << "\n"
               << "  False positives:  " << r.false_positives      << "\n"
@@ -381,7 +386,7 @@ static void write_csv_header(std::ofstream& f) {
          "keygen_ms,bf_build_ms,client_send_ms,"
          "server_recv_ms,server_compute_ms,server_send_ms,"
          "client_recv_ms,decrypt_ms,total_client_ms,total_server_ms,"
-         "bytes_client_to_server,bytes_server_to_client,total_bytes,"
+         "bytes_client_to_server,bytes_server_to_client,bytes_client_to_ca,bytes_ca_to_client,total_bytes,"
          "result_size,true_intersection,false_positives,false_negatives,fp_rate\n";
 }
 
@@ -406,7 +411,10 @@ static void write_csv_row(std::ofstream& f, const ExperimentConfig& cfg, const R
       << r.server.total_ms       << ","
       << r.client.bytes_sent     << ","
       << r.server.bytes_sent     << ","
-      << (r.client.bytes_sent + r.server.bytes_sent) << ","
+      << r.client.bytes_ca_send  << ","
+      << r.client.bytes_ca_recv  << ","
+      << (r.client.bytes_sent + r.server.bytes_sent
+        + r.client.bytes_ca_send + r.client.bytes_ca_recv) << ","
       << r.result_size           << ","
       << r.true_intersection     << ","
       << r.false_positives       << ","
@@ -421,7 +429,7 @@ static void write_csv_avg_row(std::ofstream& f, const ExperimentConfig& cfg,
     double n = static_cast<double>(results.size());
     double keygen = 0, bf_build = 0, c_send = 0, s_recv = 0, s_compute = 0,
            s_send = 0, c_recv = 0, decrypt = 0, c_total = 0, s_total = 0,
-           bytes_cs = 0, bytes_sc = 0, total_b = 0,
+           bytes_cs = 0, bytes_sc = 0, bytes_ca_s = 0, bytes_ca_r = 0, total_b = 0,
            res_sz = 0, true_int = 0, fp = 0, fn = 0, fp_rate = 0;
     for (const auto& r : results) {
         keygen    += r.keygen_ms;
@@ -436,7 +444,10 @@ static void write_csv_avg_row(std::ofstream& f, const ExperimentConfig& cfg,
         s_total   += r.server.total_ms;
         bytes_cs  += static_cast<double>(r.client.bytes_sent);
         bytes_sc  += static_cast<double>(r.server.bytes_sent);
-        total_b   += static_cast<double>(r.client.bytes_sent + r.server.bytes_sent);
+        bytes_ca_s += static_cast<double>(r.client.bytes_ca_send);
+        bytes_ca_r += static_cast<double>(r.client.bytes_ca_recv);
+        total_b   += static_cast<double>(r.client.bytes_sent + r.server.bytes_sent
+                                       + r.client.bytes_ca_send + r.client.bytes_ca_recv);
         res_sz    += r.result_size;
         true_int  += r.true_intersection;
         fp        += r.false_positives;
@@ -465,9 +476,11 @@ static void write_csv_avg_row(std::ofstream& f, const ExperimentConfig& cfg,
       << c_total  / n << ","
       << s_total  / n << ","
       << std::setprecision(1)
-      << bytes_cs / n << ","
-      << bytes_sc / n << ","
-      << total_b  / n << ","
+      << bytes_cs   / n << ","
+      << bytes_sc   / n << ","
+      << bytes_ca_s / n << ","
+      << bytes_ca_r / n << ","
+      << total_b    / n << ","
       << std::setprecision(3)
       << res_sz   / n << ","
       << true_int / n << ","
