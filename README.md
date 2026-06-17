@@ -5,6 +5,8 @@ PSI-CA, PSI, APSI-CA, APSI from Debnath & Dutta (ISC 2015).
 ## Build & Setup
 
 ```bash
+sudo apt update
+sudo apt install build-essential libgmp-dev libssl-dev
 make all
 ./generate_dataset 1000 cards.txt  # count must exceed your largest --client or --server size
 ```
