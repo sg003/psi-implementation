@@ -12,7 +12,7 @@ constexpr int      CA_PORT       = 9001;
 // K doubles as the number of BF hash functions and the φ output length.
 // False positive rate = 1/2^K.  K=30 → negligible collisions with ≤10k elements.
 // inline (not constexpr) so experiment.cpp can set it at runtime via --k.
-inline size_t      K             = 30;
+inline size_t      K             = 40;
 
 // ── Set sizes ─────────────────────────────────────────────────────────────────
 constexpr size_t   SERVER_SET_SIZE = 300;   // v  (server's sample from the universe)

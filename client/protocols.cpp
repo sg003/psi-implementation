@@ -223,6 +223,16 @@ int client_apsi_ca(sock_t fd, GM& gm, const GMPublicKey& pk, const GMSecretKey& 
     auto t1 = Clock::now();
     timing->bf_build_ms = elapsed_ms(t0, t1);
 
+    timing->bytes_ca_send = mpz_wire_bytes(pk.n) + mpz_wire_bytes(pk.u)
+                          + sizeof(uint32_t)   // m
+                          + sizeof(uint32_t);  // y_size
+    for (const auto& item : Y)
+        timing->bytes_ca_send += sizeof(uint32_t) + item.size();
+    timing->bytes_ca_recv = sizeof(uint32_t) + sig_size
+                          + sizeof(uint32_t);  // bf_size
+    for (const auto& c : encrypted_bf) timing->bytes_ca_recv += mpz_wire_bytes(c);
+    timing->bytes_ca_recv += sizeof(uint32_t) + ca_public_key_pem.size();
+
     // ── Send certified BF to PSI server ──────────────────────────────────────
     auto t2 = Clock::now();
     send_string(fd, ca_public_key_pem);
@@ -326,6 +336,16 @@ std::vector<std::string> client_apsi(sock_t fd, GM& gm, const GMPublicKey& pk, c
     CLOSE_SOCKET(ca_fd);
     auto t1 = Clock::now();
     timing->bf_build_ms = elapsed_ms(t0, t1);
+
+    timing->bytes_ca_send = mpz_wire_bytes(pk.n) + mpz_wire_bytes(pk.u)
+                          + sizeof(uint32_t)   // m
+                          + sizeof(uint32_t);  // y_size
+    for (const auto& item : Y_hashed)
+        timing->bytes_ca_send += sizeof(uint32_t) + item.size();
+    timing->bytes_ca_recv = sizeof(uint32_t) + sig_size
+                          + sizeof(uint32_t);  // bf_size
+    for (const auto& c : encrypted_bf) timing->bytes_ca_recv += mpz_wire_bytes(c);
+    timing->bytes_ca_recv += sizeof(uint32_t) + ca_public_key_pem.size();
 
     // ── Send certified BF to PSI server ──────────────────────────────────────
     auto t2 = Clock::now();
